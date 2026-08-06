@@ -4,8 +4,10 @@ const User = require('../models/User');
 const Game = require('../models/Game');
 const Bid = require('../models/Bid');
 const Transaction = require('../models/Transaction');
+const adminAuth = require('../middleware/adminAuth');
 
-// Dashboard stats
+router.use(adminAuth);
+
 router.get('/stats', async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
@@ -22,21 +24,21 @@ router.get('/stats', async (req, res) => {
       totalBidsAmount: totalBidsAmount[0]?.total || 0,
     });
   } catch (error) {
-    res.status(500).json({error: error.message});
+    console.error('Admin stats error:', error.message);
+    res.status(500).json({error: 'Server error'});
   }
 });
 
-// Get all users
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find().select('-password').sort({createdAt: -1});
+    const users = await User.find().select('-password -mpin').sort({createdAt: -1});
     res.json(users);
   } catch (error) {
-    res.status(500).json({error: error.message});
+    console.error('Admin users error:', error.message);
+    res.status(500).json({error: 'Server error'});
   }
 });
 
-// Get all bids
 router.get('/bids', async (req, res) => {
   try {
     const bids = await Bid.find()
@@ -45,31 +47,46 @@ router.get('/bids', async (req, res) => {
       .sort({createdAt: -1});
     res.json(bids);
   } catch (error) {
-    res.status(500).json({error: error.message});
+    console.error('Admin bids error:', error.message);
+    res.status(500).json({error: 'Server error'});
   }
 });
 
-// Update user wallet
 router.put('/users/:id/wallet', async (req, res) => {
   try {
     const {amount} = req.body;
+
+    if (typeof amount !== 'number' || isNaN(amount)) {
+      return res.status(400).json({error: 'Invalid amount'});
+    }
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       {$inc: {wallet: amount}},
       {new: true},
-    ).select('-password');
+    ).select('-password -mpin');
+
+    if (!user) {
+      return res.status(404).json({error: 'User not found'});
+    }
+
     res.json(user);
   } catch (error) {
-    res.status(500).json({error: error.message});
+    console.error('Admin wallet update error:', error.message);
+    res.status(500).json({error: 'Server error'});
   }
 });
 
-// Declare results for all users
 router.post('/declare-results', async (req, res) => {
   try {
     const {gameId, winningNumbers} = req.body;
 
+    if (!gameId || !Array.isArray(winningNumbers)) {
+      return res.status(400).json({error: 'Invalid request data'});
+    }
+
     const bids = await Bid.find({game: gameId, status: 'pending'});
+    let processedBids = 0;
 
     for (const bid of bids) {
       if (winningNumbers.includes(bid.number)) {
@@ -81,11 +98,13 @@ router.post('/declare-results', async (req, res) => {
         bid.status = 'lost';
       }
       await bid.save();
+      processedBids++;
     }
 
-    res.json({message: 'Results declared', processedBids: bids.length});
+    res.json({message: 'Results declared', processedBids});
   } catch (error) {
-    res.status(500).json({error: error.message});
+    console.error('Declare results error:', error.message);
+    res.status(500).json({error: 'Server error'});
   }
 });
 
